@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Showing Nearby Hospitals....</title>
+    <style>
+        /* Global Styles */
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #30e7de;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            color: #333;
+        }
+
+        h1 {
+            margin-top: 30px;
+            color: #3f4a5b;
+            font-size: 32px;
+            font-weight: 600;
+        }
+
+        /* Hospital List */
+        #hospital-list {
+            margin-top: 30px;
+            width: 100%;
+            max-width: 700px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            overflow-y: auto;
+            max-height: 350px;
+        }
+
+        .hospital {
+            padding: 15px;
+            background-color: #ffffff;
+            margin: 10px 0;
+            border-radius: 12px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .hospital:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .hospital strong {
+            font-size: 18px;
+            color: #007bff;
+        }
+
+        .hospital p {
+            margin: 8px 0;
+            color: #555;
+        }
+
+        /* Map Styling */
+        #map {
+            width: 100%;
+            height: 400px;
+            margin-top: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Button Styling */
+        .navigate-button {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 12px 20px;
+            background-color: #007bff;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 500;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background-color 0.3s ease;
+        }
+
+        .navigate-button:hover {
+            background-color: #0056b3;
+        }
+
+        .navigate-button:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Showing Nearby Hospitals..... </h1>
+    <div id="hospital-list">Loading...</div>
+    <div id="map"></div>
+
+    <script>
+        let map;
+        let userLat, userLon;
+
+        // Function to display the list of hospitals
+        function displayHospitals(hospitals) {
+            const listContainer = document.getElementById('hospital-list');
+            listContainer.innerHTML = ''; // Clear loading text
+            if (hospitals.length === 0) {
+                listContainer.innerHTML = 'No hospitals found nearby.';
+            } else {
+                // Show only the 3 nearest hospitals
+                const nearestHospitals = hospitals.slice(0, 3);
+                nearestHospitals.forEach(hospital => {
+                    const div = document.createElement('div');
+                    div.classList.add('hospital');
+                    div.innerHTML = `<strong>${hospital.name}</strong><br><p>Distance: ${hospital.distance.toFixed(2)} km</p>`;
+                    div.onclick = () => {
+                        // Navigate to hospital when clicked
+                        openHospitalDirections(hospital);
+                    };
+                    listContainer.appendChild(div);
+                });
+            }
+        }
+
+        // Function to calculate distance between two coordinates in kilometers
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Radius of the Earth in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a =
+                0.5 - Math.cos(dLat) / 2 +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                (1 - Math.cos(dLon)) / 2;
+            return R * 2 * Math.asin(Math.sqrt(a)); // Distance in km
+        }
+
+        // Function to fetch nearby hospitals using OpenStreetMap's Overpass API
+        function fetchNearbyHospitals(lat, lon) {
+            const overpassUrl = `https://overpass-api.de/api/interpreter?data=[out:json];node["amenity"="hospital"](around:20000,${lat},${lon});out;`;
+            fetch(overpassUrl)
+                .then(response => response.json())
+                .then(data => {
+                    const hospitals = data.elements.map(hospital => {
+                        const distance = calculateDistance(lat, lon, hospital.lat, hospital.lon);
+                        return {
+                            name: hospital.tags.name || "Unknown Hospital",
+                            lat: hospital.lat,
+                            lon: hospital.lon,
+                            distance: distance
+                        };
+                    });
+                    // Sort hospitals by distance
+                    hospitals.sort((a, b) => a.distance - b.distance);
+
+                    // Display the 3 nearest hospitals
+                    displayHospitals(hospitals);
+
+                    // Add markers and path to the map
+                    addHospitalsToMap(lat, lon, hospitals);
+                })
+                .catch(error => {
+                    console.error("Error fetching hospitals:", error);
+                    document.getElementById('hospital-list').innerHTML = 'Failed to retrieve hospital data.';
+                });
+        }
+
+        // Function to add hospitals and path to the map
+        function addHospitalsToMap(userLat, userLon, hospitals) {
+            // Add a marker for the user's location
+            const userMarker = L.marker([userLat, userLon]).addTo(map).bindPopup("You are here").openPopup();
+
+            // Add markers for hospitals
+            hospitals.slice(0, 3).forEach(hospital => {
+                const hospitalMarker = L.marker([hospital.lat, hospital.lon]).addTo(map)
+                    .bindPopup(`<strong>${hospital.name}</strong><br>Distance: ${hospital.distance.toFixed(2)} km`)
+                    .on('click', () => openHospitalDirections(hospital));
+            });
+
+            // Draw a path to the nearest hospital
+            if (hospitals.length > 0) {
+                const nearestHospital = hospitals[0];
+                const path = L.polyline([[userLat, userLon], [nearestHospital.lat, nearestHospital.lon]], {
+                    color: 'blue',
+                    weight: 4,
+                    opacity: 0.7
+                }).addTo(map);
+                map.fitBounds(path.getBounds());
+            }
+        }
+
+        // Function to open directions to the hospital in Google Maps
+        function openHospitalDirections(hospital) {
+            if (userLat && userLon) {
+                const hospitalLocation = `${hospital.lat},${hospital.lon}`;
+                const directionsUrl = `https://www.google.com/maps/dir/?api=1&origin=${userLat},${userLon}&destination=${hospitalLocation}`;
+                window.open(directionsUrl, '_blank');
+            } else {
+                alert("Your location is not available.");
+            }
+        }
+
+        // Initialize the map and fetch hospitals
+        function initMap(lat, lon) {
+            userLat = lat;
+            userLon = lon;
+
+            const mapContainer = document.getElementById('map');
+            map = L.map(mapContainer).setView([lat, lon], 13);
+
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // Fetch nearby hospitals
+            fetchNearbyHospitals(lat, lon);
+        }
+
+        // Request user's location
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                position => {
+                    const userLat = position.coords.latitude;
+                    const userLon = position.coords.longitude;
+                    initMap(userLat, userLon);
+                },
+                error => {
+                    console.error('Error obtaining location:', error);
+                    document.getElementById('hospital-list').innerHTML = 'Unable to retrieve your location.';
+                }
+            );
+        } else {
+            document.getElementById('hospital-list').innerHTML = 'Geolocation is not supported by this browser.';
+        }
+    </script>
+
+    <!-- Load Leaflet.js for map rendering -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+
+</body>
+
+</html>
